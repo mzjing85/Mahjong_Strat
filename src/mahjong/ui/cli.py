@@ -6,7 +6,27 @@ from ..core.game import Game
 from ..core.tiles import Tile
 from ..players.base import Player
 from ..rules.base import BaseRules
-from .render import render_discard_history
+from .render import render_discard_history, render_player_discards
+
+
+TILE_COLUMN_WIDTH = 5
+
+
+def format_tile(tile: Tile) -> str:
+    return f"{tile.unicode_symbol} {tile.code} ({tile.name})"
+
+
+def display_help() -> None:
+    print(
+        "\nCommands:\n"
+        "  hand                 Show your concealed hand\n"
+        "  discard <index>      Discard a tile by index\n"
+        "  exposed              Show exposed melds\n"
+        "  table                Show table status and discards\n"
+        "  history              Show chronological discard history\n"
+        "  help                 Show these commands\n"
+        "  quit                 Leave the game\n"
+    )
 
 
 def display_player_hand(player: Player) -> None:
@@ -15,8 +35,14 @@ def display_player_hand(player: Player) -> None:
         print("(empty)")
         return
 
-    indices = " ".join(f"[{index:^3}]" for index in range(len(player.hand.tiles)))
-    tiles = " ".join(f"{tile.unicode_symbol:^5}" for tile in player.hand.tiles)
+    indices = " ".join(
+        f"[{index}]".center(TILE_COLUMN_WIDTH)
+        for index in range(len(player.hand.tiles))
+    )
+    tiles = " ".join(
+        tile.unicode_symbol.center(TILE_COLUMN_WIDTH)
+        for tile in player.hand.tiles
+    )
     print(indices)
     print(tiles)
 
@@ -31,36 +57,54 @@ def display_exposed_melds(player: Player) -> None:
 
 
 def display_all_exposed_melds(game: Game) -> None:
-    print("Exposed melds at table:")
+    print("Exposed melds:")
     any_exposed_melds = False
     for player in game.players:
         if not player.exposed_melds:
             continue
         any_exposed_melds = True
         meld_text = " | ".join(
-            " ".join(tile.unicode_symbol for tile in meld)
+            " ".join(f"{tile.unicode_symbol} {tile.code}" for tile in meld)
             for meld in player.exposed_melds
         )
-        print(f"  {player.player_name}: {meld_text}")
+        print(f"  {player.player_name:<10} {meld_text}")
     if not any_exposed_melds:
         print("  (none)")
 
 
 def handle_player_turn(game: Game, player: Player, discard_history: List[Tuple[str, Tile]]) -> Tile:
-    print("\n" + "=" * 50)
-    print(render_discard_history(discard_history))
-    print(f"{player.player_name} to act (Seat {player.seat_number})")
-    print(f"Current game state: {game}")
-    print(f"Wall tiles remaining: {len(game.wall)}")
+    print("\n" + "=" * 80)
+    print("TABLE")
+    print(f"  Round: {game.round_number:<5} Wall remaining: {len(game.wall):<4} "
+          f"Current player: {player.player_name} (Seat {player.seat_number})")
+    print(render_player_discards(game.players))
     display_all_exposed_melds(game)
+    print(f"\nPLAYER: {player.player_name}")
     display_exposed_melds(player)
     display_player_hand(player)
 
     while True:
-        command = input("Enter command ('hand', 'discard <index>', or 'quit'): ").strip()
+        command = input("\nCommand (help for options): ").strip()
 
         if command.lower() in {"hand", "show hand"}:
             display_player_hand(player)
+            continue
+
+        if command.lower() in {"help", "?"}:
+            display_help()
+            continue
+
+        if command.lower() == "exposed":
+            display_exposed_melds(player)
+            continue
+
+        if command.lower() == "table":
+            print(render_player_discards(game.players))
+            display_all_exposed_melds(game)
+            continue
+
+        if command.lower() == "history":
+            print(render_discard_history(discard_history))
             continue
 
         if command.lower() in {"quit", "exit"}:
@@ -79,9 +123,9 @@ def handle_player_turn(game: Game, player: Player, discard_history: List[Tuple[s
                 print(f"Error: {exc}")
                 continue
 
-            print(f"{player.player_name} discarded {discarded_tile.unicode_symbol}")
+            print(f"{player.player_name} discarded {format_tile(discarded_tile)}")
             discard_history.append((player.player_name, discarded_tile))
-            print(render_discard_history(discard_history))
+            print(render_player_discards(game.players))
             return discarded_tile
 
         print("Unknown command.")
@@ -104,19 +148,14 @@ def prompt_for_claim(
     claim_type: str,
     options: Optional[List[Tuple[Tile, Tile, Tile]]] = None,
 ) -> bool:
+    print(f"\n{player.player_name} can claim {claim_type}.")
     if options:
-        print(
-            f"{player.player_name} may chi with: "
-            + ", ".join(
-                f"{index + 1}: {' '.join(tile.code for tile in option)}"
-                for index, option in enumerate(options)
-            )
-        )
-    answer = input(
-        f"{player.player_name}, claim {claim_type}? [y/N]"
-        + (" Choose option number: " if options else " ")
-    ).strip().lower()
-    return answer == "y" if not options else answer.startswith("y ")
+        for index, option in enumerate(options, start=1):
+            print(f"  {index}. " + "  ".join(format_tile(tile) for tile in option))
+        answer = input("Choose an option number, or press Enter to pass: ").strip()
+        return bool(answer)
+    answer = input("Claim it? [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
 
 
 def resolve_discard_claim(
@@ -172,14 +211,10 @@ def resolve_discard_claim(
     next_player = ordered_players[0]
     chi_options = rules.chi_options(next_player, discarded_tile)
     if chi_options:
-        print(
-            f"{next_player.player_name} may chi with options: "
-            + ", ".join(
-                f"{index + 1}: {' '.join(tile.code for tile in option)}"
-                for index, option in enumerate(chi_options)
-            )
-        )
-        choice = input("Claim chi? Enter option number or press Enter to pass: ").strip()
+        print(f"\n{next_player.player_name} can claim chi:")
+        for index, option in enumerate(chi_options, start=1):
+            print(f"  {index}. " + "  ".join(format_tile(tile) for tile in option))
+        choice = input("Choose an option number, or press Enter to pass: ").strip()
         if choice:
             try:
                 selected_option = chi_options[int(choice) - 1]

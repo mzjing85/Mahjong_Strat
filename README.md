@@ -36,6 +36,10 @@ In the game, use:
 
 - `hand` or `show hand` to display the current hand
 - `discard <index>` to discard a tile by its displayed index
+- `exposed` to display your exposed melds
+- `table` to display player discards and exposed melds
+- `history` to display chronological discard history
+- `help` to display all commands
 - `quit` or `exit` to leave the game
 
 ## Project structure

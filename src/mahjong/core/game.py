@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import List, Optional
 
 from ..players.base import Player
@@ -19,6 +17,7 @@ class Game:
     winner: Optional[Player] = None
     round_number: int = 1
     rules: BaseRules = field(default_factory=BaseRules)
+    initial_discard_pending: bool = False
 
     def __post_init__(self) -> None:
         if not self.players:
@@ -33,8 +32,12 @@ class Game:
             for player in self.players:
                 player.draw_tile(self.wall.draw())
 
+        self.current_player_index = self.dealer_index
+        self.players[self.dealer_index].draw_tile(self.wall.draw())
+
         for player in self.players:
             player.sort_hand()
+        self.initial_discard_pending = True
 
     def next_turn(self) -> None:
         self.current_player_index = (self.current_player_index + 1) % len(self.players)
@@ -50,69 +53,7 @@ class Game:
         raise ValueError(f"Seat number {seat_number} does not exist in the game")
 
     def check_complete_hand(self, player: Player) -> bool:
-        exposed_tile_count = sum(
-            self.rules.meld_tile_count(meld) for meld in player.melds
-        )
-        if len(player.hand) + exposed_tile_count != 14:
-            return False
-
-        tile_counts = Counter(
-            (tile.suit.value, tile.rank) for tile in player.hand
-        )
-        return self._can_form_complete_hand(tuple(sorted(tile_counts.items())))
-
-    @staticmethod
-    @lru_cache(maxsize=None)
-    def _can_form_complete_hand(
-        counted_tiles: tuple[tuple[tuple[str, int], int], ...],
-    ) -> bool:
-        counts = dict(counted_tiles)
-        if not counts:
-            return True
-
-        for pair_tile, pair_count in counts.items():
-            if pair_count >= 2:
-                remaining = counts.copy()
-                remaining[pair_tile] -= 2
-                if remaining[pair_tile] == 0:
-                    del remaining[pair_tile]
-                if Game._can_form_melds(tuple(sorted(remaining.items()))):
-                    return True
-
-        return False
-
-    @staticmethod
-    @lru_cache(maxsize=None)
-    def _can_form_melds(
-        counted_tiles: tuple[tuple[tuple[str, int], int], ...],
-    ) -> bool:
-        counts = dict(counted_tiles)
-        if not counts:
-            return True
-
-        first_tile = min(counts)
-        suit, rank = first_tile
-        if counts[first_tile] >= 3:
-            remaining = counts.copy()
-            remaining[first_tile] -= 3
-            if remaining[first_tile] == 0:
-                del remaining[first_tile]
-            if Game._can_form_melds(tuple(sorted(remaining.items()))):
-                return True
-
-        sequence_tiles = ((suit, rank), (suit, rank + 1), (suit, rank + 2))
-        if suit in {"bamboo", "character", "dot"} and rank <= 7 and all(
-            counts.get(tile, 0) > 0 for tile in sequence_tiles
-        ):
-            remaining = counts.copy()
-            for tile in sequence_tiles:
-                remaining[tile] -= 1
-                if remaining[tile] == 0:
-                    del remaining[tile]
-            if Game._can_form_melds(tuple(sorted(remaining.items()))):
-                return True
-
-        return False
+        return self.rules.is_complete_hand(player)
 
     def declare_winner(self, player: Player) -> None:
         self.winner = player
@@ -122,7 +63,10 @@ class Game:
             return self.winner
 
         player = self.current_player()
-        player.draw_tile(self.wall.draw())
+        if self.initial_discard_pending:
+            self.initial_discard_pending = False
+        else:
+            player.draw_tile(self.wall.draw())
         player.sort_hand()
 
         if self.check_complete_hand(player):

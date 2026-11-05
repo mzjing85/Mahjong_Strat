@@ -12,11 +12,13 @@ from .render import render_discard_history
 def display_player_hand(player: Player) -> None:
     print(f"{player.player_name} hand:")
     if not player.hand.tiles:
-        print("  (empty)")
+        print("(empty)")
         return
 
-    for index, tile in enumerate(player.hand.tiles):
-        print(f"  [{index}] {tile.unicode_symbol}")
+    indices = " ".join(f"[{index:^3}]" for index in range(len(player.hand.tiles)))
+    tiles = " ".join(f"{tile.unicode_symbol:^5}" for tile in player.hand.tiles)
+    print(indices)
+    print(tiles)
 
 
 def display_exposed_melds(player: Player) -> None:
@@ -94,10 +96,7 @@ def player_order_after(game: Game, player: Player) -> List[Player]:
 
 
 def player_can_win_on_discard(game: Game, player: Player, discarded_tile: Tile) -> bool:
-    player.draw_tile(discarded_tile)
-    can_win = game.check_complete_hand(player)
-    player.hand.remove_tile(discarded_tile)
-    return can_win
+    return game.rules.can_win_on_discard(player, discarded_tile)
 
 
 def prompt_for_claim(
@@ -128,9 +127,14 @@ def resolve_discard_claim(
     ordered_players = player_order_after(game, discarder)
     rules: BaseRules = game.rules
 
+    def remove_claimed_discard() -> None:
+        if discarded_tile in discarder.discarded_tiles:
+            discarder.discarded_tiles.remove(discarded_tile)
+
     for player in ordered_players:
         if player_can_win_on_discard(game, player, discarded_tile):
             if prompt_for_claim(player, "win"):
+                remove_claimed_discard()
                 player.draw_tile(discarded_tile)
                 game.declare_winner(player)
                 return player
@@ -154,10 +158,14 @@ def resolve_discard_claim(
             "Use four-tile peng? [y/N] "
         ).strip().lower() == "y"
         rules.claim_peng(player, discarded_tile, four_tile=four_tile)
+        remove_claimed_discard()
         if four_tile and rules.config.fourTilePengGrantsExtraDraw:
             player.draw_tile(game.wall.draw())
             player.sort_hand()
             print(f"{player.player_name} received an extra draw.")
+            if game.check_complete_hand(player):
+                game.declare_winner(player)
+                return player
         print(f"{player.player_name} exposed {claim_type}.")
         return player
 
@@ -176,6 +184,7 @@ def resolve_discard_claim(
             try:
                 selected_option = chi_options[int(choice) - 1]
                 rules.claim_chi(next_player, discarded_tile, selected_option)
+                remove_claimed_discard()
                 print(f"{next_player.player_name} exposed chi.")
                 return next_player
             except (IndexError, ValueError):

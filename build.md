@@ -458,12 +458,13 @@ to establish the game flow before adding a complete ruleset or scoring system.
 - Four players are seated at the table.
 - The wall contains 136 tiles: three numbered suits, four winds, and three
   dragons, with four copies of each tile.
-- Each player receives 13 tiles.
-- The dealer is the first player to draw.
+- Each non-dealer receives 13 tiles.
+- The dealer receives 14 tiles and makes the first discard.
 
 ### Normal turn
 
-1. The active player draws one tile from the wall.
+1. The active player draws one tile from the wall. The dealer skips this draw
+   for the opening turn because the dealer starts with 14 tiles.
 2. The player may declare a win if the hand is complete.
 3. If the player does not win, they discard one tile.
 4. The discard is added to that player's discard pile.

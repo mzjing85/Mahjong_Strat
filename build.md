@@ -447,3 +447,59 @@ The next step is to implement the foundational classes in this exact order:
 - terminal turn loop
 
 After that, you can plug in the CLI display and validation logic.
+
+## 12. Current simplified rules overview
+
+The current version is a simplified four-player Mahjong round. It is intended
+to establish the game flow before adding a complete ruleset or scoring system.
+
+### Setup
+
+- Four players are seated at the table.
+- The wall contains 136 tiles: three numbered suits, four winds, and three
+  dragons, with four copies of each tile.
+- Each player receives 13 tiles.
+- The dealer is the first player to draw.
+
+### Normal turn
+
+1. The active player draws one tile from the wall.
+2. The player may declare a win if the hand is complete.
+3. If the player does not win, they discard one tile.
+4. The discard is added to that player's discard pile.
+5. Play passes to the next player in seat order.
+
+The round ends when a player wins, the wall is exhausted, or a player exits
+the CLI. A drawn hand occurs when the wall is exhausted without a winner.
+
+### Chi (吃)
+
+Chi is a meld made from three consecutive numbered tiles of the same suit,
+such as 3-4-5 bamboo. A player may claim the most recent discard for chi only
+when:
+
+- the discard completes a consecutive three-tile sequence;
+- the player is the next player in turn order; and
+- the tiles are all from a numbered suit, not winds or dragons.
+
+The player reveals the sequence, places it in their melds, then discards one
+tile. The CLI prompts the next player when a valid chi is available and displays the
+claimed sequence as an exposed meld.
+
+### Peng (碰)
+
+Peng is a meld made from three identical tiles. A player may claim the most
+recent discard for peng when they hold two matching copies. The player reveals
+the triplet, places it in their melds, then discards one tile. Unlike chi, peng
+can be claimed by any player, subject to resolving competing claims according
+to the rules implementation.
+
+The CLI prompts eligible players for peng before offering chi. Exposed peng
+and four-tile peng sets are shown above the player's concealed hand.
+
+### Winning and scoring
+
+The current engine checks for a basic four-meld-and-a-pair structure using the
+concealed tiles and any recorded three-tile melds. It does not calculate
+points, apply yaku or fan, or select a specific Riichi or Hong Kong scoring
+system. Those rules belong in the later rule-module and scoring phases.

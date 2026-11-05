@@ -42,3 +42,7 @@ class Player:
 
     def __str__(self) -> str:
         return f"{self.player_name} (Seat {self.seat_number})"
+
+    @property
+    def exposed_melds(self) -> List[List[Tile]]:
+        return self.melds

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from ..core.game import Game
 from ..core.tiles import Tile
 from ..players.base import Player
+from ..rules.base import BaseRules
 from .render import render_discard_history
 
 
@@ -18,12 +19,39 @@ def display_player_hand(player: Player) -> None:
         print(f"  [{index}] {tile.unicode_symbol}")
 
 
-def handle_player_turn(game: Game, player: Player, discard_history: List[Tuple[str, Tile]]) -> None:
+def display_exposed_melds(player: Player) -> None:
+    print("Exposed melds:")
+    if not player.exposed_melds:
+        print("  (none)")
+        return
+    for meld in player.exposed_melds:
+        print("  " + " ".join(tile.unicode_symbol for tile in meld))
+
+
+def display_all_exposed_melds(game: Game) -> None:
+    print("Exposed melds at table:")
+    any_exposed_melds = False
+    for player in game.players:
+        if not player.exposed_melds:
+            continue
+        any_exposed_melds = True
+        meld_text = " | ".join(
+            " ".join(tile.unicode_symbol for tile in meld)
+            for meld in player.exposed_melds
+        )
+        print(f"  {player.player_name}: {meld_text}")
+    if not any_exposed_melds:
+        print("  (none)")
+
+
+def handle_player_turn(game: Game, player: Player, discard_history: List[Tuple[str, Tile]]) -> Tile:
     print("\n" + "=" * 50)
     print(render_discard_history(discard_history))
     print(f"{player.player_name} to act (Seat {player.seat_number})")
     print(f"Current game state: {game}")
     print(f"Wall tiles remaining: {len(game.wall)}")
+    display_all_exposed_melds(game)
+    display_exposed_melds(player)
     display_player_hand(player)
 
     while True:
@@ -52,9 +80,108 @@ def handle_player_turn(game: Game, player: Player, discard_history: List[Tuple[s
             print(f"{player.player_name} discarded {discarded_tile.unicode_symbol}")
             discard_history.append((player.player_name, discarded_tile))
             print(render_discard_history(discard_history))
-            return
+            return discarded_tile
 
         print("Unknown command.")
+
+
+def player_order_after(game: Game, player: Player) -> List[Player]:
+    player_index = game.players.index(player)
+    return [
+        game.players[(player_index + offset) % len(game.players)]
+        for offset in range(1, len(game.players))
+    ]
+
+
+def player_can_win_on_discard(game: Game, player: Player, discarded_tile: Tile) -> bool:
+    player.draw_tile(discarded_tile)
+    can_win = game.check_complete_hand(player)
+    player.hand.remove_tile(discarded_tile)
+    return can_win
+
+
+def prompt_for_claim(
+    player: Player,
+    claim_type: str,
+    options: Optional[List[Tuple[Tile, Tile, Tile]]] = None,
+) -> bool:
+    if options:
+        print(
+            f"{player.player_name} may chi with: "
+            + ", ".join(
+                f"{index + 1}: {' '.join(tile.code for tile in option)}"
+                for index, option in enumerate(options)
+            )
+        )
+    answer = input(
+        f"{player.player_name}, claim {claim_type}? [y/N]"
+        + (" Choose option number: " if options else " ")
+    ).strip().lower()
+    return answer == "y" if not options else answer.startswith("y ")
+
+
+def resolve_discard_claim(
+    game: Game,
+    discarder: Player,
+    discarded_tile: Tile,
+) -> Optional[Player]:
+    ordered_players = player_order_after(game, discarder)
+    rules: BaseRules = game.rules
+
+    for player in ordered_players:
+        if player_can_win_on_discard(game, player, discarded_tile):
+            if prompt_for_claim(player, "win"):
+                player.draw_tile(discarded_tile)
+                game.declare_winner(player)
+                return player
+
+    peng_candidates = [
+        player for player in ordered_players
+        if rules.can_peng(player, discarded_tile)
+    ]
+    if not rules.config.closestPengWins:
+        peng_candidates = [
+            player for player in game.players
+            if player is not discarder and player in peng_candidates
+        ]
+
+    for player in peng_candidates:
+        can_four_tile_peng = rules.can_four_tile_peng(player, discarded_tile)
+        claim_type = "peng or four-tile peng" if can_four_tile_peng else "peng"
+        if not prompt_for_claim(player, claim_type):
+            continue
+        four_tile = can_four_tile_peng and input(
+            "Use four-tile peng? [y/N] "
+        ).strip().lower() == "y"
+        rules.claim_peng(player, discarded_tile, four_tile=four_tile)
+        if four_tile and rules.config.fourTilePengGrantsExtraDraw:
+            player.draw_tile(game.wall.draw())
+            player.sort_hand()
+            print(f"{player.player_name} received an extra draw.")
+        print(f"{player.player_name} exposed {claim_type}.")
+        return player
+
+    next_player = ordered_players[0]
+    chi_options = rules.chi_options(next_player, discarded_tile)
+    if chi_options:
+        print(
+            f"{next_player.player_name} may chi with options: "
+            + ", ".join(
+                f"{index + 1}: {' '.join(tile.code for tile in option)}"
+                for index, option in enumerate(chi_options)
+            )
+        )
+        choice = input("Claim chi? Enter option number or press Enter to pass: ").strip()
+        if choice:
+            try:
+                selected_option = chi_options[int(choice) - 1]
+                rules.claim_chi(next_player, discarded_tile, selected_option)
+                print(f"{next_player.player_name} exposed chi.")
+                return next_player
+            except (IndexError, ValueError):
+                print("Invalid chi option; the discard was not claimed.")
+
+    return None
 
 
 def run_cli_game() -> None:
@@ -62,13 +189,31 @@ def run_cli_game() -> None:
     game.deal_initial_hands()
     print("Welcome to Mahjong CLI")
     print("Four players are seated and the wall has been shuffled.")
-    print("Each player will take turns choosing a tile to discard.")
+    print("Each player will draw and then choose a tile to discard.")
     discard_history: List[Tuple[str, Tile]] = []
 
-    for _ in range(4):
+    while game.winner is None:
         current_player = game.current_player()
-        handle_player_turn(game, current_player, discard_history)
+        try:
+            winner = game.start_turn()
+        except ValueError as exc:
+            print(f"\nRound ended: {exc}")
+            break
+
+        if winner is not None:
+            print(f"\n{winner.player_name} wins!")
+            break
+
+        discarded_tile = handle_player_turn(game, current_player, discard_history)
+        claimant = resolve_discard_claim(game, current_player, discarded_tile)
+        if claimant is not None:
+            if game.winner is not None:
+                print(f"\n{claimant.player_name} wins!")
+                break
+            current_player = claimant
+            handle_player_turn(game, current_player, discard_history)
+            game.set_current_player(current_player.seat_number)
         game.next_turn()
 
-    print("\nInitial turn cycle complete.")
-    print("Step 1 is complete: 4 players, turn order, and CLI input are working.")
+    if game.winner is None and not game.wall:
+        print("No tiles remain in the wall. The round is a draw.")
